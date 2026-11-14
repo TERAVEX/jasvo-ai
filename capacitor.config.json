@@ -1,0 +1,8 @@
+{
+  "appId": "com.teravex.jasvoai",
+  "appName": "JASVO AI",
+  "webDir": "chat-ui",
+  "server": {
+    "androidScheme": "https"
+  }
+}
