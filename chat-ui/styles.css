@@ -285,3 +285,50 @@ button { cursor: pointer; }
   .hero { padding-inline: 14px; }
   .composer { padding-left: 11px; }
 }
+
+/* ---------- Responsive sidebar, profile and PWA controls ---------- */
+.sb-head-actions { display:flex; align-items:center; gap:4px; }
+.desktop-collapse { display:grid; }
+.side-tools { display:flex; flex-direction:column; gap:3px; padding:6px 0 10px; border-bottom:1px solid var(--border); }
+.side-tool { display:flex; align-items:center; gap:11px; width:100%; padding:9px 10px; border:0; border-radius:var(--radius); background:transparent; text-align:left; color:var(--fg); font-size:14px; }
+.side-tool:hover { background:var(--accent); }
+.side-tool-icon { display:grid; place-items:center; width:18px; height:18px; color:var(--muted-fg); flex:none; }
+.side-tool-icon svg { width:18px; height:18px; }
+.install-shortcut:not([hidden]) { display:flex; }
+.profile-area { padding:8px 0 4px; border-top:1px solid var(--border); }
+.profile-button { display:flex; align-items:center; gap:10px; width:100%; padding:7px 6px; border:0; border-radius:var(--radius); background:transparent; text-align:left; min-width:0; }
+.profile-button:hover { background:var(--accent); }
+.profile-avatar { width:34px; height:34px; display:grid; place-items:center; border-radius:50%; flex:none; background:linear-gradient(145deg,#72c8ff,#3478f6 58%,#293aa8); color:white; font-weight:700; }
+.profile-copy { display:flex; flex-direction:column; min-width:0; flex:1; }
+.profile-name,.profile-email { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.profile-name { font-size:13px; font-weight:650; }
+.profile-email { font-size:11px; color:var(--muted-fg); }
+.profile-more { color:var(--muted-fg); letter-spacing:1px; }
+.account-btn[hidden] { display:none !important; }
+.settings-overlay,.feature-overlay { position:fixed; inset:0; z-index:70; display:grid; place-items:center; padding:18px; background:rgb(0 0 0 / 48%); }
+.settings-dialog { width:min(100%,440px); max-height:min(90dvh,720px); overflow:auto; padding:22px; border:1px solid var(--border); border-radius:20px; background:var(--card); color:var(--fg); box-shadow:var(--shadow); }
+.settings-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.settings-head h2 { margin:0; font-size:20px; }
+.settings-head p,.settings-note { margin:5px 0 0; color:var(--muted-fg); font-size:13px; }
+.profile-form { margin-top:20px; }
+.settings-field { display:grid; gap:7px; font-size:13px; font-weight:600; }
+.settings-field input { width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:10px; background:var(--bg); color:var(--fg); }
+.settings-note { line-height:1.5; margin:9px 0 16px; }
+.settings-status { min-height:20px; font-size:12px; color:var(--muted-fg); }
+.settings-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-top:14px; border-top:1px solid var(--border); font-size:13px; }
+.settings-theme { padding:7px 10px; border:1px solid var(--border); border-radius:9px; background:var(--muted); color:var(--fg); }
+@media (min-width:821px) {
+  .app.sidebar-collapsed .sidebar { width:72px; padding-left:7px; padding-right:7px; }
+  .app.sidebar-collapsed .brand-name,.app.sidebar-collapsed .nav-label,.app.sidebar-collapsed .search,
+  .app.sidebar-collapsed .group-label,.app.sidebar-collapsed .chat-title,.app.sidebar-collapsed .chat-del,
+  .app.sidebar-collapsed .plan,.app.sidebar-collapsed .by,.app.sidebar-collapsed .profile-copy,
+  .app.sidebar-collapsed .profile-more { display:none !important; }
+  .app.sidebar-collapsed .sb-head { justify-content:center; padding-left:0; padding-right:0; }
+  .app.sidebar-collapsed .brand { display:none; }
+  .app.sidebar-collapsed .new-chat,.app.sidebar-collapsed .side-tool { justify-content:center; padding:10px 0; }
+  .app.sidebar-collapsed .chat-list { overflow:hidden; }
+  .app.sidebar-collapsed .chat-row { min-height:34px; justify-content:center; }
+  .app.sidebar-collapsed .profile-button { justify-content:center; padding:7px 0; }
+  .app.sidebar-collapsed .foot-row { justify-content:center; }
+}
+@media (max-width:820px) { .desktop-collapse { display:none; } }

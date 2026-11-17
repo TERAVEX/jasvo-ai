@@ -1,14 +1,22 @@
 {
+  "id": "/",
   "name": "JASVO AI",
   "short_name": "JASVO",
+  "description": "Your AI companion, built in Kenya for everyone.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#f7faff",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "background_color": "#fcfcfd",
   "theme_color": "#3478f6",
+  "orientation": "any",
   "icons": [
     {
       "src": "jasvo-mark.svg",
-      "sizes": "any",
+      "sizes": "192x192 512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }

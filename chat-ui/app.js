@@ -39,6 +39,10 @@
     search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
     moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+    panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+    image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a8 8 0 0 0 0-6l1.4-1.1-1.4-2.4-1.7.6a8 8 0 0 0-5.7-1.6L11.7 2h-2.8l-.3 2.5a8 8 0 0 0-2.5 1.5l-2.3-.7-1.4 2.4 1.8 1.7a8 8 0 0 0 0 5l-1.8 1.7 1.4 2.4 2.3-.7a8 8 0 0 0 2.5 1.5l.3 2.5h2.8l.3-2.5a8 8 0 0 0 2.5-1.5l2.3.7 1.4-2.4Z"/>',
+    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/>',
   };
 
   function icon(name) {
@@ -51,7 +55,8 @@
   }
 
   /* ---------- state ---------- */
-  var state = { chats: [], activeId: null, mode: "chat", theme: null, usage: { day: "", count: 0 } };
+  var state = { chats: [], activeId: null, mode: "chat", theme: null, usage: { day: "", count: 0 }, preferredName: "" };
+  var deferredInstallPrompt = null;
   var pendingFiles = [];
   var live = null; // { timer, chatId, msg, body }
 
@@ -243,7 +248,16 @@
   /* ---------- account and email authentication ---------- */
   function renderAccount() {
     var permanent = currentAuthUser && !currentAuthUser.is_anonymous;
-    $("accountBtn").textContent = permanent ? (currentAuthUser.email || "Account") : "Sign in";
+    var metadataName = permanent && currentAuthUser.user_metadata &&
+      (currentAuthUser.user_metadata.preferred_name || currentAuthUser.user_metadata.full_name);
+    var preferred = (metadataName || state.preferredName || "").trim();
+    var email = permanent ? (currentAuthUser.email || "") : "";
+    var display = preferred || (email ? email.split("@")[0] : "Guest");
+    $("profileName").textContent = display;
+    $("profileEmail").textContent = email || "Sign in to sync chats";
+    $("profileAvatar").textContent = display.charAt(0).toUpperCase() || "G";
+    $("preferredName").value = preferred;
+    $("accountBtn").textContent = permanent ? display : "Sign in";
     var recovery = authMode === "reset";
     $("authSignedIn").hidden = !permanent || recovery;
     $("authForm").hidden = !!permanent && !recovery;
@@ -382,6 +396,10 @@
   /* ---------- rendering ---------- */
   function renderIcons() {
     $("closeSidebar").innerHTML = icon("x");
+    $("collapseSidebar").innerHTML = icon("panel");
+    $("imagesIcon").innerHTML = icon("image");
+    $("settingsIcon").innerHTML = icon("settings");
+    $("installIcon").innerHTML = icon("download");
     $("openSidebar").innerHTML = icon("menu");
     $("newChatIcon").innerHTML = icon("plus");
     $("searchIcon").innerHTML = icon("search");
@@ -612,6 +630,12 @@
     if (/[?&]demo=1/.test(location.search) && !state.chats.length) seedDemo();
 
     renderIcons(); renderTheme();
+    try {
+      if (localStorage.getItem("jasvo.sidebarCollapsed") === "1" && window.innerWidth > 820) {
+        els.app.classList.add("sidebar-collapsed");
+        $("collapseSidebar").setAttribute("aria-label", "Expand sidebar");
+      }
+    } catch (e) {}
 
     $("suggestions").innerHTML = SUGGESTIONS.map(function (s) { return '<button type="button" class="chip-btn">' + esc(s) + "</button>"; }).join("");
     $("suggestions").addEventListener("click", function (e) {
@@ -668,6 +692,78 @@
     });
 
     $("accountBtn").addEventListener("click", function () { openAuth("signin"); });
+    $("profileButton").addEventListener("click", function () {
+      if (currentAuthUser && !currentAuthUser.is_anonymous) openAuth("signin");
+      else openAuth("signin");
+    });
+    $("collapseSidebar").addEventListener("click", function () {
+      var collapsed = els.app.classList.toggle("sidebar-collapsed");
+      try { localStorage.setItem("jasvo.sidebarCollapsed", collapsed ? "1" : "0"); } catch (e) {}
+      $("collapseSidebar").setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+      $("collapseSidebar").title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    });
+    $("settingsShortcut").addEventListener("click", function () {
+      $("settingsOverlay").hidden = false;
+      $("preferredName").focus();
+      closeMenu();
+    });
+    $("settingsClose").addEventListener("click", function () { $("settingsOverlay").hidden = true; });
+    $("settingsOverlay").addEventListener("click", function (e) { if (e.target === $("settingsOverlay")) $("settingsOverlay").hidden = true; });
+    $("settingsTheme").addEventListener("click", function () {
+      state.theme = state.theme === "dark" ? "light" : "dark";
+      save(); renderTheme();
+    });
+    $("profileForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var name = $("preferredName").value.trim();
+      if (!name) { $("settingsStatus").textContent = "Enter a preferred name."; return; }
+      $("settingsStatus").textContent = "Saving…";
+      state.preferredName = name;
+      save();
+      if (currentAuthUser && !currentAuthUser.is_anonymous && backendClient) {
+        backendClient.auth.updateUser({ data: { preferred_name: name } }).then(function (result) {
+          if (result.error) throw result.error;
+          currentAuthUser = result.data.user;
+          $("settingsStatus").textContent = "Your preferred name has been saved.";
+          renderAccount();
+        }).catch(function (error) {
+          $("settingsStatus").textContent = error.message || "Could not save your name.";
+        });
+      } else {
+        $("settingsStatus").textContent = "Saved on this device. Sign in to sync your profile across devices.";
+        renderAccount();
+      }
+    });
+    $("imagesShortcut").addEventListener("click", function () {
+      $("imagesOverlay").hidden = false;
+      closeMenu();
+    });
+    $("imagesClose").addEventListener("click", function () { $("imagesOverlay").hidden = true; });
+    $("imagesOverlay").addEventListener("click", function (e) { if (e.target === $("imagesOverlay")) $("imagesOverlay").hidden = true; });
+    window.addEventListener("beforeinstallprompt", function (e) {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      $("installApp").hidden = false;
+    });
+    $("installApp").addEventListener("click", function () {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      deferredInstallPrompt.userChoice.then(function () {
+        deferredInstallPrompt = null;
+        $("installApp").hidden = true;
+      });
+    });
+    window.addEventListener("appinstalled", function () {
+      deferredInstallPrompt = null;
+      $("installApp").hidden = true;
+    });
+    if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("./service-worker.js").catch(function (error) {
+          console.warn("JASVO offline setup:", error);
+        });
+      });
+    }
     $("authClose").addEventListener("click", closeAuth);
     $("authOverlay").addEventListener("click", function (event) {
       if (event.target === $("authOverlay")) closeAuth();

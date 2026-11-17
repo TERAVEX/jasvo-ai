@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#fcfcfd" />
+    <meta name="theme-color" content="#3478f6" />
     <meta name="description" content="JASVO AI — a helpful AI companion built in Kenya for everyone." />
     <link rel="icon" type="image/svg+xml" href="jasvo-mark.svg" />
     <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="apple-touch-icon" href="jasvo-mark.svg" />
     <title>JASVO AI</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="brand.css" />
@@ -21,16 +25,21 @@
             <span class="logo" aria-hidden="true"></span>
             <span class="brand-name">JASVO <span class="brand-ai">AI</span></span>
           </div>
-          <button class="icon-btn only-mobile" id="closeSidebar" aria-label="Close menu"></button>
+          <div class="sb-head-actions"><button class="icon-btn desktop-collapse" id="collapseSidebar" aria-label="Collapse sidebar" title="Collapse sidebar"></button><button class="icon-btn only-mobile" id="closeSidebar" aria-label="Close menu"></button></div>
         </div>
 
-        <button class="new-chat" id="newChat"><span id="newChatIcon"></span> New chat</button>
+        <button class="new-chat" id="newChat"><span id="newChatIcon"></span><span class="nav-label">New chat</span></button>
 
         <label class="search">
           <span id="searchIcon" aria-hidden="true"></span>
           <input id="search" type="search" placeholder="Search chats" autocomplete="off" aria-label="Search chats" />
         </label>
 
+        <nav class="side-tools" aria-label="Tools">
+          <button class="side-tool" id="imagesShortcut" type="button"><span class="side-tool-icon" id="imagesIcon"></span><span class="nav-label">Images</span></button>
+          <button class="side-tool" id="settingsShortcut" type="button"><span class="side-tool-icon" id="settingsIcon"></span><span class="nav-label">Settings</span></button>
+          <button class="side-tool install-shortcut" id="installApp" type="button" hidden><span class="side-tool-icon" id="installIcon"></span><span class="nav-label">Install app</span></button>
+        </nav>
         <nav class="chat-list" id="chatList" aria-label="Chat history"></nav>
 
         <div class="sb-foot">
@@ -41,6 +50,13 @@
             </div>
             <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
             <div class="plan-note">Resets at midnight EAT</div>
+          </div>
+          <div class="profile-area">
+            <button class="profile-button" id="profileButton" type="button" aria-label="Open account profile">
+              <span class="profile-avatar" id="profileAvatar">G</span>
+              <span class="profile-copy"><span class="profile-name" id="profileName">Guest</span><span class="profile-email" id="profileEmail">Sign in to sync chats</span></span>
+              <span class="profile-more" aria-hidden="true">•••</span>
+            </button>
           </div>
           <div class="foot-row">
             <span class="by">An AI product by TERAVEX</span>
@@ -57,7 +73,7 @@
             <div class="top-mode"><span class="dot"></span><span id="topMode">Chat mode</span></div>
           </div>
           <div class="top-actions">
-            <button type="button" class="account-btn" id="accountBtn">Sign in</button>
+            <button type="button" class="account-btn" id="accountBtn" hidden>Sign in</button>
           </div>
         </header>
 
@@ -128,6 +144,26 @@
           <p id="authSignedInAs"></p>
           <button class="auth-submit secondary" id="authSignOut" type="button">Sign out</button>
         </div>
+      </section>
+    </div>
+
+
+    <div class="settings-overlay" id="settingsOverlay" hidden>
+      <section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="settings-head"><div><h2 id="settingsTitle">Settings</h2><p>Make JASVO feel like yours.</p></div><button type="button" class="icon-btn" id="settingsClose" aria-label="Close settings">×</button></div>
+        <form id="profileForm" class="profile-form">
+          <label class="settings-field">Preferred name<input id="preferredName" type="text" maxlength="40" placeholder="What should JASVO call you?" autocomplete="nickname"></label>
+          <p class="settings-note">This name appears in your sidebar profile. Your email remains your sign-in address.</p>
+          <button class="auth-submit" type="submit" id="saveProfile">Save name</button>
+          <p class="settings-status" id="settingsStatus" role="status" aria-live="polite"></p>
+        </form>
+        <div class="settings-row"><span>Appearance</span><button class="settings-theme" type="button" id="settingsTheme">Toggle light / dark</button></div>
+      </section>
+    </div>
+    <div class="feature-overlay" id="imagesOverlay" hidden>
+      <section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="imagesTitle">
+        <div class="settings-head"><div><h2 id="imagesTitle">Images</h2><p>Image tools are being prepared for JASVO.</p></div><button type="button" class="icon-btn" id="imagesClose" aria-label="Close images">×</button></div>
+        <p class="settings-note">This shortcut is ready in the sidebar. Image generation will be connected in a later update.</p>
       </section>
     </div>
 
