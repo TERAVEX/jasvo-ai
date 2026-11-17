@@ -254,9 +254,6 @@
 
   function renderAuthMode() {
     var permanent = currentAuthUser && !currentAuthUser.is_anonymous;
-    var pendingPassword = authMode === "signup" && permanent &&
-      currentAuthUser.email_confirmed_at && localStorage.getItem("jasvo.pendingEmailPassword") === "1";
-    if (permanent && authMode !== "reset" && !pendingPassword) return;
     if (authMode === "reset") {
       $("authPasswordWrap").hidden = false;
       $("authPassword").required = true;
@@ -271,18 +268,13 @@
       tab.classList.toggle("active", active);
       tab.setAttribute("aria-pressed", active ? "true" : "false");
     });
-    var needsEmailVerification = authMode === "signup" &&
-      currentAuthUser && currentAuthUser.is_anonymous &&
-      !(currentAuthUser.email && currentAuthUser.email_confirmed_at);
-    $("authPasswordWrap").hidden = !!needsEmailVerification;
-    $("authPassword").required = !needsEmailVerification;
-    $("authSubmit").textContent = needsEmailVerification ? "Send verification email" :
-      (authMode === "signup" ? "Set password / create account" : "Sign in");
+    $("authPasswordWrap").hidden = false;
+    $("authPassword").required = true;
+    $("authSubmit").textContent = authMode === "signup" ? "Create account" : "Sign in";
     $("authForgot").hidden = authMode !== "signin";
-    $("authHint").textContent = needsEmailVerification
-      ? "First verify your email. Your guest account and its chat history will be kept."
-      : (pendingPassword ? "Email verified. Set a password to finish securing your account."
-        : (authMode === "signup" ? "Use at least 8 characters. If you have just verified your email, set your password here." : "Welcome back. Sign in with your email and password."));
+    $("authHint").textContent = authMode === "signup"
+      ? "Create your JASVO account with your email and a password of at least 8 characters."
+      : "Welcome back. Sign in with your email and password.";
   }
 
   function openAuth(mode) {
@@ -309,49 +301,22 @@
     var password = $("authPassword").value;
     var status = $("authStatus");
     var submit = $("authSubmit");
-    if (!email) return;
-    if ((authMode === "signin" || authMode === "reset") && !password) {
-      status.textContent = authMode === "reset" ? "Enter your new password." : "Enter your password to sign in.";
+    if (!email) { status.textContent = "Enter your email address."; return; }
+    if (authMode !== "reset" && (!password || password.length < 8)) {
+      status.textContent = "Use a password with at least 8 characters.";
       return;
     }
-    if (authMode === "reset" && password.length < 8) {
+    if (authMode === "reset" && (!password || password.length < 8)) {
       status.textContent = "Choose a password with at least 8 characters.";
       return;
     }
-    if (authMode === "signup" && currentAuthUser && currentAuthUser.is_anonymous &&
-        !(currentAuthUser.email && currentAuthUser.email_confirmed_at)) {
-      status.textContent = "Sending verification email…";
-      localStorage.setItem("jasvo.pendingEmailPassword", "1");
-      submit.disabled = true;
-      backendReady.then(function () {
-        if (currentAuthUser.email && currentAuthUser.email.toLowerCase() === email) {
-          status.textContent = "Verification is already pending. Check your inbox, then return here to set your password.";
-          return null;
-        }
-        return backendClient.auth.updateUser({ email: email }).then(function (result) {
-          if (result.error) throw result.error;
-          status.textContent = "Check your inbox and confirm your email. Your guest conversations stay attached to this account. After confirming, return here and choose Create account to set your password.";
-        });
-      }).catch(function (error) {
-        localStorage.removeItem("jasvo.pendingEmailPassword");
-        status.textContent = error.message || "Could not send the verification email. Please try again.";
-      }).finally(function () { submit.disabled = false; });
-      return;
-    }
-    if (authMode === "signup" && (!password || password.length < 8)) {
-      status.textContent = "Choose a password with at least 8 characters.";
-      return;
-    }
-    status.textContent = authMode === "signin" ? "Signing in…" : "Saving your account…";
+    status.textContent = authMode === "signin" ? "Signing in…" :
+      (authMode === "reset" ? "Saving your password…" : "Creating your account…");
     submit.disabled = true;
     backendReady.then(function () {
       if (authMode === "reset") return backendClient.auth.updateUser({ password: password });
       if (authMode === "signin") {
         return backendClient.auth.signInWithPassword({ email: email, password: password });
-      }
-      if (currentAuthUser && currentAuthUser.email &&
-          currentAuthUser.email.toLowerCase() === email && currentAuthUser.email_confirmed_at) {
-        return backendClient.auth.updateUser({ password: password });
       }
       return backendClient.auth.signUp({
         email: email,
@@ -359,17 +324,19 @@
         options: { emailRedirectTo: authRedirectUrl() }
       });
     }).then(function (result) {
-      if (!result) return;
       if (result.error) throw result.error;
       if (authMode === "signup" && result.data && result.data.user && !result.data.session) {
-        status.textContent = "Account created. Check your email to confirm your address, then sign in.";
+        status.textContent = "Account created. Check your email to verify your address, then sign in.";
       } else if (authMode === "reset") {
         status.textContent = "Your password has been updated.";
         authMode = "signin";
+        renderAuthMode();
       } else {
-        if (authMode === "signup") localStorage.removeItem("jasvo.pendingEmailPassword");
-        status.textContent = authMode === "signup" ? "Your password has been saved." : "You're signed in.";
-        if (result.data && result.data.user) currentAuthUser = result.data.user;
+        status.textContent = authMode === "signup" ? "Your account is ready." : "You're signed in.";
+        if (result.data && result.data.user) {
+          currentAuthUser = result.data.user;
+          authUserId = result.data.user.id;
+        }
         renderAccount();
         if (currentAuthUser && !currentAuthUser.is_anonymous) {
           setTimeout(function () { closeAuth(); }, 700);
