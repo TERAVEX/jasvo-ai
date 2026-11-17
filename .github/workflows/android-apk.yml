@@ -49,11 +49,9 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm install
 
-      - name: Package Supabase SDK for local WebView loading
+      - name: Build web assets and package Supabase SDK
         run: |
-          SDK_PATH="node_modules/@supabase/supabase-js/dist/umd/supabase.js"
-          test -s "$SDK_PATH"
-          cp "$SDK_PATH" chat-ui/supabase-sdk.js
+          npm run web:build
           test -s chat-ui/supabase-sdk.js
           node --check chat-ui/supabase-sdk.js
           node --check chat-ui/app.js
