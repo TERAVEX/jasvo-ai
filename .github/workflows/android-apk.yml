@@ -2,6 +2,13 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'chat-ui/**'
+      - 'package.json'
+      - 'capacitor.config.json'
+      - '.github/workflows/android-apk.yml'
   push:
     branches: [main]
     paths:
@@ -48,12 +55,18 @@ jobs:
           test -s "$SDK_PATH"
           cp "$SDK_PATH" chat-ui/supabase-sdk.js
           test -s chat-ui/supabase-sdk.js
+          node --check chat-ui/supabase-sdk.js
+          node --check chat-ui/app.js
+          node --check chat-ui/supabase-config.js
 
       - name: Generate Android project
         run: npx cap add android
 
       - name: Sync web app into Android project
         run: npx cap sync android
+
+      - name: Verify bundled SDK is in Android assets
+        run: test -s android/app/src/main/assets/public/supabase-sdk.js
 
       - name: Build debug APK
         working-directory: android
