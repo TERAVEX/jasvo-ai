@@ -143,7 +143,9 @@ The Render build does not need an Anthropic key. The Anthropic key remains in Su
 JASVO supports email/password sign-in, email verification, and password reset through Supabase Auth. Guest sessions can be upgraded by linking an email identity; enable **manual identity linking** in Supabase Auth settings for this flow. The user verifies the email first, then returns to JASVO to set a password.
 
 Configure Supabase Auth's Site URL and Redirect URLs for:
-- The deployed Render site and any custom domain.
-- The Android Capacitor origin used by the installed app.
+- The deployed Render site: `https://jasvo-ai.onrender.com/**`.
+- Any custom domain added later.
+
+The shared `authRedirectUrl` in `chat-ui/supabase-config.js` points web and Android email confirmation / password-reset flows to the Render website. Set the Supabase Auth Site URL to `https://jasvo-ai.onrender.com` and add that URL to the allowed Redirect URLs.
 
 Do not place service-role keys or the Anthropic API key in Render static-site environment variables or browser code.
