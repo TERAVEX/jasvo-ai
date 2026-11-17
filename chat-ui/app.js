@@ -254,7 +254,9 @@
 
   function renderAuthMode() {
     var permanent = currentAuthUser && !currentAuthUser.is_anonymous;
-    if (permanent && authMode !== "reset") return;
+    var pendingPassword = authMode === "signup" && permanent &&
+      currentAuthUser.email_confirmed_at && localStorage.getItem("jasvo.pendingEmailPassword") === "1";
+    if (permanent && authMode !== "reset" && !pendingPassword) return;
     if (authMode === "reset") {
       $("authPasswordWrap").hidden = false;
       $("authPassword").required = true;
@@ -279,12 +281,14 @@
     $("authForgot").hidden = authMode !== "signin";
     $("authHint").textContent = needsEmailVerification
       ? "First verify your email. Your guest account and its chat history will be kept."
-      : (authMode === "signup" ? "Use at least 8 characters. If you have just verified your email, set your password here." : "Welcome back. Sign in with your email and password.");
+      : (pendingPassword ? "Email verified. Set a password to finish securing your account."
+        : (authMode === "signup" ? "Use at least 8 characters. If you have just verified your email, set your password here." : "Welcome back. Sign in with your email and password."));
   }
 
   function openAuth(mode) {
     if (mode) authMode = mode;
     $("authStatus").textContent = "";
+    if (currentAuthUser && currentAuthUser.email) $("authEmail").value = currentAuthUser.email;
     $("authOverlay").hidden = false;
     renderAccount();
     $("authEmail").focus();
@@ -312,6 +316,7 @@
     if (authMode === "signup" && currentAuthUser && currentAuthUser.is_anonymous &&
         !(currentAuthUser.email && currentAuthUser.email_confirmed_at)) {
       status.textContent = "Sending verification email…";
+      localStorage.setItem("jasvo.pendingEmailPassword", "1");
       submit.disabled = true;
       backendReady.then(function () {
         if (currentAuthUser.email && currentAuthUser.email.toLowerCase() === email) {
@@ -323,6 +328,7 @@
           status.textContent = "Check your inbox and confirm your email. Your guest conversations stay attached to this account. After confirming, return here and choose Create account to set your password.";
         });
       }).catch(function (error) {
+        localStorage.removeItem("jasvo.pendingEmailPassword");
         status.textContent = error.message || "Could not send the verification email. Please try again.";
       }).finally(function () { submit.disabled = false; });
       return;
@@ -356,6 +362,7 @@
         status.textContent = "Your password has been updated.";
         authMode = "signin";
       } else {
+        if (authMode === "signup") localStorage.removeItem("jasvo.pendingEmailPassword");
         status.textContent = authMode === "signup" ? "Your password has been saved." : "You're signed in.";
         if (result.data && result.data.user) currentAuthUser = result.data.user;
         renderAccount();
@@ -707,6 +714,8 @@
       backendClient.auth.onAuthStateChange(function (event, session) {
         if (session && session.user) {
           if (event === "PASSWORD_RECOVERY") authMode = "reset";
+          if (localStorage.getItem("jasvo.pendingEmailPassword") === "1" &&
+              !session.user.is_anonymous && session.user.email_confirmed_at) authMode = "signup";
           if (event === "SIGNED_IN" && authUserId && authUserId !== session.user.id) {
             state.chats = [];
             state.activeId = null;
@@ -721,6 +730,8 @@
         }
         renderAccount();
         if (event === "PASSWORD_RECOVERY") openAuth("reset");
+        else if (authMode === "signup" && currentAuthUser && !currentAuthUser.is_anonymous &&
+                 currentAuthUser.email_confirmed_at && localStorage.getItem("jasvo.pendingEmailPassword") === "1") openAuth("signup");
         if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
           setTimeout(function () {
             syncRemoteChats().catch(function (error) { console.warn("JASVO account sync:", error); });
@@ -730,7 +741,14 @@
     }
     renderAll();
     renderAccount();
-    backendReady.then(syncRemoteChats).catch(function (error) {
+    backendReady.then(function (session) {
+      if (localStorage.getItem("jasvo.pendingEmailPassword") === "1" &&
+          session.user && !session.user.is_anonymous && session.user.email_confirmed_at) {
+        authMode = "signup";
+        openAuth("signup");
+      }
+      return syncRemoteChats();
+    }).catch(function (error) {
       console.warn("JASVO backend sign-in/sync:", error);
     });
   }
