@@ -72,7 +72,7 @@ jobs:
 
       - name: Prepare public APK filename
         if: github.event_name == 'push'
-        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/JASVO-AI.apk
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk android/app/build/outputs/apk/debug/JASVO-AI.apk
 
       - name: Publish latest Android APK
         if: github.event_name == 'push'
