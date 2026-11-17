@@ -298,6 +298,11 @@
     $("authOverlay").hidden = true;
   }
 
+  function authRedirectUrl() {
+    var configured = window.JASVO_SUPABASE_CONFIG && window.JASVO_SUPABASE_CONFIG.authRedirectUrl;
+    return configured || (window.location.origin + window.location.pathname);
+  }
+
   function submitAuth(event) {
     event.preventDefault();
     var email = $("authEmail").value.trim().toLowerCase();
@@ -351,7 +356,7 @@
       return backendClient.auth.signUp({
         email: email,
         password: password,
-        options: { emailRedirectTo: window.location.origin + window.location.pathname }
+        options: { emailRedirectTo: authRedirectUrl() }
       });
     }).then(function (result) {
       if (!result) return;
@@ -384,7 +389,7 @@
     $("authStatus").textContent = "Sending password reset email…";
     backendReady.then(function () {
       return backendClient.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin + window.location.pathname
+        redirectTo: authRedirectUrl()
       });
     }).then(function (result) {
       if (result.error) throw result.error;
