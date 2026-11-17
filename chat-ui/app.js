@@ -1,9 +1,8 @@
 /*
- * JASVO AI chat UI (front end only).
+ * JASVO AI chat UI.
  *
- * Nothing here talks to a server. `requestReply()` is the single seam where the
- * real backend call goes later (authenticated request to the JASVO AI gateway).
- * No API keys, memory logic or payments live in this file by design.
+ * The existing interface is preserved. Authentication, chat persistence and
+ * AI replies are handled by the dedicated Supabase backend.
  */
 (function () {
   "use strict";
@@ -61,7 +60,12 @@
       var raw = localStorage.getItem(STORE_KEY);
       if (raw) {
         var s = JSON.parse(raw);
-        if (s && Array.isArray(s.chats)) state = Object.assign(state, s);
+        if (s && Array.isArray(s.chats)) {
+          state = Object.assign(state, s);
+          state.chats.forEach(function (c) {
+            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(c.id)) c.id = uid();
+          });
+        }
       }
     } catch (e) {}
   }
@@ -95,7 +99,15 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   }
-  function uid() { return Math.random().toString(36).slice(2, 10); }
+  function uid() {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    var bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    var hex = Array.prototype.map.call(bytes, function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+    return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+  }
   function activeChat() {
     for (var i = 0; i < state.chats.length; i++) if (state.chats[i].id === state.activeId) return state.chats[i];
     return null;
@@ -150,32 +162,72 @@
       .join("");
   }
 
-  /* ---------- mock reply (replace with the real gateway call) ---------- */
-  var SW = /\b(habari|sasa|niaje|mambo|poa|nataka|naomba|tafadhali|asante|vipi|msee|kwani|aje|nisaidie|kuandika|shida|sawa|kidogo|nimeshindwa)\b/i;
+  /* ---------- Supabase backend ---------- */
+  var backendClient = null;
+  var backendReady = (function () {
+    if (!window.supabase || !window.JASVO_SUPABASE_CONFIG) return Promise.reject(new Error("JASVO backend client could not load."));
+    backendClient = window.supabase.createClient(
+      window.JASVO_SUPABASE_CONFIG.url,
+      window.JASVO_SUPABASE_CONFIG.publishableKey,
+      { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } }
+    );
+    return backendClient.auth.getSession().then(function (result) {
+      if (result.error) throw result.error;
+      if (result.data.session) return result.data.session;
+      return backendClient.auth.signInAnonymously().then(function (signedIn) {
+        if (signedIn.error) throw signedIn.error;
+        return signedIn.data.session;
+      });
+    });
+  })();
 
-  function requestReply(text, mode, cb) {
-    var sw = SW.test(text);
-    var reply;
-    if (/code|python|javascript|bug|loop|function/i.test(text)) {
-      reply = sw
-        ? "Sawa, tuangalie hii pamoja. Tatizo la kawaida ni **index** kuanza kwa 0.\n\n```python\nfor i in range(len(items)):\n    print(i, items[i])\n```\n\nNikionyesha code yako kamili, nitakuambia mstari halisi wenye shida."
-        : "Happy to help. A common cause is an off-by-one error, since indexes start at 0.\n\n```python\nfor i in range(len(items)):\n    print(i, items[i])\n```\n\nPaste your full code and I'll point to the exact line.";
-    } else if (mode === "tutor") {
-      reply = sw
-        ? "Tuanze hatua kwa hatua:\n\n1. Kwanza, ni nini unachojua tayari kuhusu mada hii?\n2. Nitaeleza wazo kuu kwa mfano rahisi.\n3. Kisha nitakuuliza swali dogo kuangalia kama umeelewa.\n\nUko Form gani?"
-        : "Let's take it step by step:\n\n1. Tell me what you already know about this topic.\n2. I'll explain the core idea with a simple example.\n3. Then I'll ask a quick question to check it landed.\n\nWhat level are you studying at?";
-    } else if (mode === "study") {
-      reply = "I can turn your notes into:\n\n- a short summary\n- flashcards\n- revision questions\n\nPaste the notes or upload a file, and tell me which one you want first.";
-    } else if (mode === "practice") {
-      reply = "Let's practise. Tell me the topic and your level, and I'll give you three exercises, one at a time, with feedback on each answer.";
-    } else if (mode === "exam") {
-      reply = "Exam mode: pick a subject, the number of questions and a time limit (for example, 10 questions in 20 minutes). I'll mark it at the end and show where you lost marks.";
-    } else if (sw) {
-      reply = "Poa! Niko hapa. Niambie unataka nini hasa, na tutaifanya step by step. Unaweza kuandika kwa Kiswahili, English au Sheng, nitafuata mtindo wako.";
-    } else {
-      reply = "Hey! I'm here and ready. Tell me what you're working on, and we'll figure it out together. You can switch between English, Kiswahili and Sheng any time.";
-    }
-    cb(reply);
+  function syncRemoteChats() {
+    return backendReady.then(function () {
+      return Promise.all([
+        backendClient.from("chat_sessions").select("id,title,mode,updated_at").order("updated_at", { ascending: false }).limit(50),
+        backendClient.rpc("get_daily_usage")
+      ]);
+    }).then(function (results) {
+      var sessions = results[0].data || [];
+      var usage = results[1].data;
+      if (typeof usage === "number") state.usage = { day: eatDay(), count: usage };
+      return Promise.all(sessions.map(function (session) {
+        return backendClient.from("chat_messages").select("role,content,created_at")
+          .eq("session_id", session.id).order("created_at", { ascending: true }).limit(100)
+          .then(function (result) {
+            if (result.error) throw result.error;
+            var chat = {
+              id: session.id, title: session.title, mode: session.mode,
+              ts: new Date(session.updated_at).getTime(),
+              messages: (result.data || []).map(function (m) {
+                return { role: m.role === "assistant" ? "bot" : "user", text: m.content, files: [] };
+              })
+            };
+            var existing = state.chats.findIndex(function (c) { return c.id === chat.id; });
+            if (existing >= 0) state.chats[existing] = chat;
+            else state.chats.push(chat);
+          });
+      }));
+    }).then(function () {
+      state.chats.sort(function (a, b) { return b.ts - a.ts; });
+      if (!state.activeId && state.chats.length) state.activeId = state.chats[0].id;
+      save(); renderAll();
+    });
+  }
+
+  function requestReply(text, mode, chat, cb) {
+    backendReady.then(function () {
+      return backendClient.functions.invoke("jasvo-chat", {
+        body: { prompt: text, mode: mode, chat_id: chat.id, title: chat.title }
+      });
+    }).then(function (result) {
+      if (result.data && result.data.error) throw new Error(result.data.error);
+      if (result.error) throw result.error;
+      if (!result.data || typeof result.data.reply !== "string") throw new Error("The backend returned an invalid response.");
+      cb(result.data.reply, null, result.data.remaining);
+    }).catch(function (error) {
+      cb(null, error && error.message ? error.message : "Unknown backend error");
+    });
   }
 
   /* ---------- rendering ---------- */
@@ -305,13 +357,17 @@
   function deleteChat(id) {
     if (!window.confirm("Delete this chat? Anything JASVO saved as a memory stays until you remove it in Memory settings.")) return;
     state.chats = state.chats.filter(function (c) { return c.id !== id; });
+    if (backendClient) backendClient.from("chat_sessions").delete().eq("id", id).then(function () {});
     if (state.activeId === id) { stopStream(); state.activeId = null; }
     save(); renderAll();
   }
 
   function setMode(id) {
     var c = activeChat();
-    if (c) c.mode = id; else state.mode = id;
+    if (c) {
+      c.mode = id;
+      if (backendClient) backendClient.from("chat_sessions").update({ mode: id }).eq("id", c.id).then(function () {});
+    } else state.mode = id;
     save(); renderModes();
   }
 
@@ -319,7 +375,13 @@
     msg.pending = true;
     renderThread();
     var body = els.thread.querySelector(".msg.bot:last-child .md");
-    requestReply(chat.messages[chat.messages.length - 2].text, chat.mode, function (full) {
+    requestReply(chat.messages[chat.messages.length - 2].text, chat.mode, chat, function (full, error, remaining) {
+      if (error) {
+        live = null; msg.pending = false;
+        msg.text = "I couldn't complete that request: " + error;
+        save(); renderAll(); return;
+      }
+      if (typeof remaining === "number") state.usage = { day: eatDay(), count: DAILY_LIMIT - remaining };
       var i = 0;
       var timer = setInterval(function () {
         i = Math.min(full.length, i + 3);
@@ -330,7 +392,6 @@
           clearInterval(timer);
           live = null;
           msg.pending = false;
-          consumeCredit(); // only a completed reply counts toward the daily allowance
           save(); renderAll();
         }
       }, 22);
@@ -458,6 +519,9 @@
     });
 
     renderAll();
+    backendReady.then(syncRemoteChats).catch(function (error) {
+      console.warn("JASVO backend sign-in/sync:", error);
+    });
   }
 
   function seedDemo() {
