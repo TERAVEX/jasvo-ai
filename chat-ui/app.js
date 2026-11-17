@@ -172,7 +172,7 @@
     backendClient = window.supabase.createClient(
       window.JASVO_SUPABASE_CONFIG.url,
       window.JASVO_SUPABASE_CONFIG.publishableKey,
-      { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false } }
+      { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }
     );
     return backendClient.auth.getSession().then(function (result) {
       if (result.error) throw result.error;
@@ -305,10 +305,7 @@
           status.textContent = "Verification is already pending. Check your inbox, then return here to set your password.";
           return null;
         }
-        return backendClient.auth.updateUser({
-          email: email,
-          options: { emailRedirectTo: window.location.origin + window.location.pathname }
-        }).then(function (result) {
+        return backendClient.auth.updateUser({ email: email }).then(function (result) {
           if (result.error) throw result.error;
           status.textContent = "Check your inbox and confirm your email. Your guest conversations stay attached to this account. After confirming, return here and choose Create account to set your password.";
         });
