@@ -244,16 +244,25 @@
   function renderAccount() {
     var permanent = currentAuthUser && !currentAuthUser.is_anonymous;
     $("accountBtn").textContent = permanent ? (currentAuthUser.email || "Account") : "Sign in";
-    $("authSignedIn").hidden = !permanent;
-    $("authForm").hidden = !!permanent;
-    $("authTabs").hidden = !!permanent;
+    var recovery = authMode === "reset";
+    $("authSignedIn").hidden = !permanent || recovery;
+    $("authForm").hidden = !!permanent && !recovery;
+    $("authTabs").hidden = !!permanent || recovery;
     if (permanent) $("authSignedInAs").textContent = "Signed in as " + (currentAuthUser.email || "your account");
     renderAuthMode();
   }
 
   function renderAuthMode() {
     var permanent = currentAuthUser && !currentAuthUser.is_anonymous;
-    if (permanent) return;
+    if (permanent && authMode !== "reset") return;
+    if (authMode === "reset") {
+      $("authPasswordWrap").hidden = false;
+      $("authPassword").required = true;
+      $("authSubmit").textContent = "Save new password";
+      $("authForgot").hidden = true;
+      $("authHint").textContent = "Choose a new password with at least 8 characters.";
+      return;
+    }
     var tabs = document.querySelectorAll("[data-auth-mode]");
     Array.prototype.forEach.call(tabs, function (tab) {
       var active = tab.getAttribute("data-auth-mode") === authMode;
@@ -292,8 +301,12 @@
     var status = $("authStatus");
     var submit = $("authSubmit");
     if (!email) return;
-    if (authMode === "signin" && !password) {
-      status.textContent = "Enter your password to sign in.";
+    if ((authMode === "signin" || authMode === "reset") && !password) {
+      status.textContent = authMode === "reset" ? "Enter your new password." : "Enter your password to sign in.";
+      return;
+    }
+    if (authMode === "reset" && password.length < 8) {
+      status.textContent = "Choose a password with at least 8 characters.";
       return;
     }
     if (authMode === "signup" && currentAuthUser && currentAuthUser.is_anonymous &&
@@ -321,6 +334,7 @@
     status.textContent = authMode === "signin" ? "Signing in…" : "Saving your account…";
     submit.disabled = true;
     backendReady.then(function () {
+      if (authMode === "reset") return backendClient.auth.updateUser({ password: password });
       if (authMode === "signin") {
         return backendClient.auth.signInWithPassword({ email: email, password: password });
       }
@@ -338,6 +352,9 @@
       if (result.error) throw result.error;
       if (authMode === "signup" && result.data && result.data.user && !result.data.session) {
         status.textContent = "Account created. Check your email to confirm your address, then sign in.";
+      } else if (authMode === "reset") {
+        status.textContent = "Your password has been updated.";
+        authMode = "signin";
       } else {
         status.textContent = authMode === "signup" ? "Your password has been saved." : "You're signed in.";
         if (result.data && result.data.user) currentAuthUser = result.data.user;
@@ -689,6 +706,7 @@
     if (backendClient && backendClient.auth) {
       backendClient.auth.onAuthStateChange(function (event, session) {
         if (session && session.user) {
+          if (event === "PASSWORD_RECOVERY") authMode = "reset";
           if (event === "SIGNED_IN" && authUserId && authUserId !== session.user.id) {
             state.chats = [];
             state.activeId = null;
@@ -702,6 +720,7 @@
           state.activeId = null;
         }
         renderAccount();
+        if (event === "PASSWORD_RECOVERY") openAuth("reset");
         if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
           setTimeout(function () {
             syncRemoteChats().catch(function (error) { console.warn("JASVO account sync:", error); });
