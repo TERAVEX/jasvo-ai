@@ -1,0 +1,7 @@
+.logo {
+  background: url("jasvo-mark.svg") center / contain no-repeat !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  border-radius: 9px;
+}
+.hero-logo { border-radius: 14px; }

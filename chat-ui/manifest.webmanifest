@@ -1,0 +1,16 @@
+{
+  "name": "JASVO AI",
+  "short_name": "JASVO",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7faff",
+  "theme_color": "#3478f6",
+  "icons": [
+    {
+      "src": "jasvo-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
