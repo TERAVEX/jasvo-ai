@@ -164,6 +164,9 @@
 
   /* ---------- Supabase backend ---------- */
   var backendClient = null;
+  var authUserId = null;
+  var currentAuthUser = null;
+  var authMode = "signin";
   var backendReady = (function () {
     if (!window.supabase || !window.JASVO_SUPABASE_CONFIG) return Promise.reject(new Error("JASVO backend client could not load."));
     backendClient = window.supabase.createClient(
@@ -173,9 +176,15 @@
     );
     return backendClient.auth.getSession().then(function (result) {
       if (result.error) throw result.error;
-      if (result.data.session) return result.data.session;
+      if (result.data.session) {
+        authUserId = result.data.session.user.id;
+        currentAuthUser = result.data.session.user;
+        return result.data.session;
+      }
       return backendClient.auth.signInAnonymously().then(function (signedIn) {
         if (signedIn.error) throw signedIn.error;
+        authUserId = signedIn.data.session.user.id;
+        currentAuthUser = signedIn.data.session.user;
         return signedIn.data.session;
       });
     });
@@ -227,6 +236,153 @@
       cb(result.data.reply, null, result.data.remaining);
     }).catch(function (error) {
       cb(null, error && error.message ? error.message : "Unknown backend error");
+    });
+  }
+
+
+  /* ---------- account and email authentication ---------- */
+  function renderAccount() {
+    var permanent = currentAuthUser && !currentAuthUser.is_anonymous;
+    $("accountBtn").textContent = permanent ? (currentAuthUser.email || "Account") : "Sign in";
+    $("authSignedIn").hidden = !permanent;
+    $("authForm").hidden = !!permanent;
+    $("authTabs").hidden = !!permanent;
+    if (permanent) $("authSignedInAs").textContent = "Signed in as " + (currentAuthUser.email || "your account");
+    renderAuthMode();
+  }
+
+  function renderAuthMode() {
+    var permanent = currentAuthUser && !currentAuthUser.is_anonymous;
+    if (permanent) return;
+    var tabs = document.querySelectorAll("[data-auth-mode]");
+    Array.prototype.forEach.call(tabs, function (tab) {
+      var active = tab.getAttribute("data-auth-mode") === authMode;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    var needsEmailVerification = authMode === "signup" &&
+      currentAuthUser && currentAuthUser.is_anonymous &&
+      !(currentAuthUser.email && currentAuthUser.email_confirmed_at);
+    $("authPasswordWrap").hidden = !!needsEmailVerification;
+    $("authPassword").required = !needsEmailVerification;
+    $("authSubmit").textContent = needsEmailVerification ? "Send verification email" :
+      (authMode === "signup" ? "Set password / create account" : "Sign in");
+    $("authForgot").hidden = authMode !== "signin";
+    $("authHint").textContent = needsEmailVerification
+      ? "First verify your email. Your guest account and its chat history will be kept."
+      : (authMode === "signup" ? "Use at least 8 characters. If you have just verified your email, set your password here." : "Welcome back. Sign in with your email and password.");
+  }
+
+  function openAuth(mode) {
+    if (mode) authMode = mode;
+    $("authStatus").textContent = "";
+    $("authOverlay").hidden = false;
+    renderAccount();
+    $("authEmail").focus();
+  }
+
+  function closeAuth() {
+    $("authOverlay").hidden = true;
+  }
+
+  function submitAuth(event) {
+    event.preventDefault();
+    var email = $("authEmail").value.trim().toLowerCase();
+    var password = $("authPassword").value;
+    var status = $("authStatus");
+    var submit = $("authSubmit");
+    if (!email) return;
+    if (authMode === "signin" && !password) {
+      status.textContent = "Enter your password to sign in.";
+      return;
+    }
+    if (authMode === "signup" && currentAuthUser && currentAuthUser.is_anonymous &&
+        !(currentAuthUser.email && currentAuthUser.email_confirmed_at)) {
+      status.textContent = "Sending verification email…";
+      submit.disabled = true;
+      backendReady.then(function () {
+        if (currentAuthUser.email && currentAuthUser.email.toLowerCase() === email) {
+          status.textContent = "Verification is already pending. Check your inbox, then return here to set your password.";
+          return null;
+        }
+        return backendClient.auth.updateUser({
+          email: email,
+          options: { emailRedirectTo: window.location.origin + window.location.pathname }
+        }).then(function (result) {
+          if (result.error) throw result.error;
+          status.textContent = "Check your inbox and confirm your email. Your guest conversations stay attached to this account. After confirming, return here and choose Create account to set your password.";
+        });
+      }).catch(function (error) {
+        status.textContent = error.message || "Could not send the verification email. Please try again.";
+      }).finally(function () { submit.disabled = false; });
+      return;
+    }
+    if (authMode === "signup" && (!password || password.length < 8)) {
+      status.textContent = "Choose a password with at least 8 characters.";
+      return;
+    }
+    status.textContent = authMode === "signin" ? "Signing in…" : "Saving your account…";
+    submit.disabled = true;
+    backendReady.then(function () {
+      if (authMode === "signin") {
+        return backendClient.auth.signInWithPassword({ email: email, password: password });
+      }
+      if (currentAuthUser && currentAuthUser.email &&
+          currentAuthUser.email.toLowerCase() === email && currentAuthUser.email_confirmed_at) {
+        return backendClient.auth.updateUser({ password: password });
+      }
+      return backendClient.auth.signUp({
+        email: email,
+        password: password,
+        options: { emailRedirectTo: window.location.origin + window.location.pathname }
+      });
+    }).then(function (result) {
+      if (!result) return;
+      if (result.error) throw result.error;
+      if (authMode === "signup" && result.data && result.data.user && !result.data.session) {
+        status.textContent = "Account created. Check your email to confirm your address, then sign in.";
+      } else {
+        status.textContent = authMode === "signup" ? "Your password has been saved." : "You're signed in.";
+        if (result.data && result.data.user) currentAuthUser = result.data.user;
+        renderAccount();
+        if (currentAuthUser && !currentAuthUser.is_anonymous) {
+          setTimeout(function () { closeAuth(); }, 700);
+        }
+      }
+    }).catch(function (error) {
+      status.textContent = error.message || "Authentication failed. Please try again.";
+    }).finally(function () { submit.disabled = false; });
+  }
+
+  function sendPasswordReset() {
+    var email = $("authEmail").value.trim().toLowerCase();
+    if (!email) {
+      $("authStatus").textContent = "Enter your email address first.";
+      return;
+    }
+    $("authStatus").textContent = "Sending password reset email…";
+    backendReady.then(function () {
+      return backendClient.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + window.location.pathname
+      });
+    }).then(function (result) {
+      if (result.error) throw result.error;
+      $("authStatus").textContent = "If an account exists for that email, a password reset link is on its way.";
+    }).catch(function (error) {
+      $("authStatus").textContent = error.message || "Could not send the reset email.";
+    });
+  }
+
+  function signOutAccount() {
+    $("authStatus").textContent = "Signing out…";
+    backendClient.auth.signOut().then(function (result) {
+      if (result.error) throw result.error;
+      return backendClient.auth.signInAnonymously();
+    }).then(function (result) {
+      if (result.error) throw result.error;
+      closeAuth();
+    }).catch(function (error) {
+      $("authStatus").textContent = error.message || "Could not sign out.";
     });
   }
 
@@ -518,7 +674,46 @@
       save(); renderTheme();
     });
 
+    $("accountBtn").addEventListener("click", function () { openAuth("signin"); });
+    $("authClose").addEventListener("click", closeAuth);
+    $("authOverlay").addEventListener("click", function (event) {
+      if (event.target === $("authOverlay")) closeAuth();
+    });
+    $("authTabs").addEventListener("click", function (event) {
+      var tab = event.target.closest("[data-auth-mode]");
+      if (!tab) return;
+      authMode = tab.getAttribute("data-auth-mode");
+      $("authStatus").textContent = "";
+      renderAuthMode();
+    });
+    $("authForm").addEventListener("submit", submitAuth);
+    $("authForgot").addEventListener("click", sendPasswordReset);
+    $("authSignOut").addEventListener("click", signOutAccount);
+    if (backendClient && backendClient.auth) {
+      backendClient.auth.onAuthStateChange(function (event, session) {
+        if (session && session.user) {
+          if (event === "SIGNED_IN" && authUserId && authUserId !== session.user.id) {
+            state.chats = [];
+            state.activeId = null;
+          }
+          authUserId = session.user.id;
+          currentAuthUser = session.user;
+        } else if (event === "SIGNED_OUT") {
+          authUserId = null;
+          currentAuthUser = null;
+          state.chats = [];
+          state.activeId = null;
+        }
+        renderAccount();
+        if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+          setTimeout(function () {
+            syncRemoteChats().catch(function (error) { console.warn("JASVO account sync:", error); });
+          }, 0);
+        }
+      });
+    }
     renderAll();
+    renderAccount();
     backendReady.then(syncRemoteChats).catch(function (error) {
       console.warn("JASVO backend sign-in/sync:", error);
     });

@@ -123,3 +123,27 @@ Implementation, infrastructure changes, external purchases, and releases require
 
 **JASVO AI — Your AI. Your vibe. Your companion.**  
 An AI product by **TERAVEX**.
+
+
+## Current web and Android delivery
+
+The web and Android clients share the same `chat-ui/` application. Capacitor packages that frontend for Android; Render serves the same files as a responsive static website.
+
+### Deploy the website on Render
+
+1. Connect `TERAVEX/jasvo-ai` to Render.
+2. Create a **Static Site** using the repository's `render.yaml` Blueprint.
+3. Render builds the pinned Supabase browser SDK into the static publish directory.
+4. Add the Render URL (and any custom domain) to Supabase Auth's allowed redirect URLs.
+
+The Render build does not need an Anthropic key. The Anthropic key remains in Supabase Edge Function secrets; only the public Supabase publishable key is used by the client.
+
+### Email accounts
+
+JASVO supports email/password sign-in, email verification, and password reset through Supabase Auth. Guest sessions can be upgraded by linking an email identity; enable **manual identity linking** in Supabase Auth settings for this flow. The user verifies the email first, then returns to JASVO to set a password.
+
+Configure Supabase Auth's Site URL and Redirect URLs for:
+- The deployed Render site and any custom domain.
+- The Android Capacitor origin used by the installed app.
+
+Do not place service-role keys or the Anthropic API key in Render static-site environment variables or browser code.
