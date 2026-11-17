@@ -8,7 +8,7 @@ Deno.serve(async(req:Request)=>{
  const authHeader=req.headers.get("Authorization");
  if(!authHeader?.startsWith("Bearer "))return json({error:"Sign in to continue."},401);
  const url=Deno.env.get("SUPABASE_URL")??"",key=Deno.env.get("SUPABASE_ANON_KEY")??Deno.env.get("SUPABASE_PUBLISHABLE_KEY")??"";
- const anthropicKey=Deno.env.get("ANTHROPIC_API_KEY"),model=Deno.env.get("ANTHROPIC_MODEL")??"claude-sonnet-4-5-20250929";
+ const anthropicKey=Deno.env.get("ANTHROPIC_API_KEY"),model=Deno.env.get("ANTHROPIC_MODEL")??"claude-sonnet-5-5";
  if(!url||!key)return json({error:"Backend configuration is incomplete."},503);
  if(!anthropicKey)return json({error:"AI provider key is not configured yet. Add ANTHROPIC_API_KEY to this Supabase project's Edge Function secrets."},503);
  const db=createClient(url,key,{global:{headers:{Authorization:authHeader}},auth:{persistSession:false,autoRefreshToken:false}});
@@ -25,7 +25,7 @@ Deno.serve(async(req:Request)=>{
   const messages=[...(prior??[]).map((m:{role:string;content:string})=>({role:m.role,content:m.content})),{role:"user",content:prompt}];
   const response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":anthropicKey,"anthropic-version":"2023-06-01"},body:JSON.stringify({model,max_tokens:1400,system:"You are JASVO AI, a warm, capable Kenyan-origin AI companion by TERAVEX. Respond naturally in English, Kiswahili, Sheng, or mixed language based on the user's message. Be accurate, clear, and transparent about uncertainty. "+guidance[mode],messages})});
   const payload=await response.json().catch(()=>({}));
-  if(!response.ok)return json({error:payload?.error?.message??"The AI provider could not complete this request."},502);
+  if(!response.ok){console.error("Anthropic provider error:",response.status,payload?.error?.type??"unknown");return json({error:"The AI provider could not complete this request. Please try again shortly."},502);}
   const reply=(payload?.content??[]).filter((p:{type:string})=>p.type==="text").map((p:{text:string})=>p.text).join("\n").trim();
   if(!reply)return json({error:"JASVO did not receive a usable response. Please try again."},502);
   const {data:count,error:saveErr}=await db.rpc("persist_chat_turn",{p_session_id:chatId,p_title:title,p_mode:mode,p_user_message:prompt,p_assistant_message:reply});
