@@ -43,6 +43,12 @@
     image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a8 8 0 0 0 0-6l1.4-1.1-1.4-2.4-1.7.6a8 8 0 0 0-5.7-1.6L11.7 2h-2.8l-.3 2.5a8 8 0 0 0-2.5 1.5l-2.3-.7-1.4 2.4 1.8 1.7a8 8 0 0 0 0 5l-1.8 1.7 1.4 2.4 2.3-.7a8 8 0 0 0 2.5 1.5l.3 2.5h2.8l.3-2.5a8 8 0 0 0 2.5-1.5l2.3.7 1.4-2.4Z"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/>',
+    mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/>',
+    audio: '<path d="M2 10v4M6 6v12M10 3v18M14 7v10M18 5v14M22 10v4"/>',
+    sparkles: '<path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="m19 14 1 2.5 2.5 1-2.5 1L19 21l-1-2.5-2.5-1 2.5-1L19 14Z"/>',
+    chevron: '<path d="m9 18 6-6-6-6"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    life: '<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/>',
   };
 
   function icon(name) {
@@ -58,6 +64,10 @@
   var state = { chats: [], activeId: null, mode: "chat", theme: null, usage: { day: "", count: 0 }, preferredName: "" };
   var deferredInstallPrompt = null;
   var pendingFiles = [];
+  var thinkMode = false;
+  var speechRecognition = null;
+  var voiceMode = false;
+  var voiceProcessing = false;
   var live = null; // { timer, chatId, msg, body }
 
   function load() {
@@ -229,10 +239,10 @@
     });
   }
 
-  function requestReply(text, mode, chat, cb) {
+  function requestReply(text, mode, chat, attachments, deepThink, cb) {
     backendReady.then(function () {
       return backendClient.functions.invoke("jasvo-chat", {
-        body: { prompt: text, mode: mode, chat_id: chat.id, title: chat.title }
+        body: { prompt: text, mode: mode, chat_id: chat.id, title: chat.title, attachments: attachments || [], think: !!deepThink }
       });
     }).then(function (result) {
       if (result.data && result.data.error) throw new Error(result.data.error);
@@ -264,6 +274,30 @@
     $("authTabs").hidden = !!permanent || recovery;
     if (permanent) $("authSignedInAs").textContent = "Signed in as " + (currentAuthUser.email || "your account");
     renderAuthMode();
+    $("accountMenuName").textContent = display;
+    $("accountMenuEmail").textContent = email || "Guest account";
+    $("accountMenuAvatar").textContent = display.charAt(0).toUpperCase() || "G";
+    $("accountMenuPlan").textContent = permanent ? "Free" : "Guest";
+    $("menuLogout").querySelector("span:last-child").textContent = permanent ? "Log out" : "Sign in";
+  }
+
+  function toggleAccountMenu(force) {
+    var menu = $("accountMenu");
+    var open = typeof force === "boolean" ? force : menu.hidden;
+    menu.hidden = !open;
+    $("profileButton").setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function openSettings() {
+    toggleAccountMenu(false);
+    $("settingsOverlay").hidden = false;
+    $("preferredName").focus();
+    closeMenu();
+  }
+
+  function showSimpleOverlay(id) {
+    toggleAccountMenu(false);
+    $(id).hidden = false;
   }
 
   function renderAuthMode() {
@@ -403,7 +437,10 @@
     $("openSidebar").innerHTML = icon("menu");
     $("newChatIcon").innerHTML = icon("plus");
     $("searchIcon").innerHTML = icon("search");
-    $("attachBtn").innerHTML = icon("clip");
+    $("attachBtn").innerHTML = icon("plus");
+    $("micBtn").innerHTML = icon("mic");
+    $("voiceBtn").innerHTML = icon("audio");
+    $("thinkBtnIcon").innerHTML = icon("sparkles");
   }
 
   function renderTheme() {
@@ -498,7 +535,7 @@
 
   function renderChips() {
     els.chips.innerHTML = pendingFiles.map(function (f, i) {
-      return '<span class="file-chip"><span>' + esc(f) + '</span><button type="button" data-rmfile="' + i + '" aria-label="Remove ' + esc(f) + '">' + icon("x") + "</button></span>";
+      return '<span class="file-chip"><span>' + esc(f.name) + '</span><button type="button" data-rmfile="' + i + '" aria-label="Remove ' + esc(f.name) + '">' + icon("x") + "</button></span>";
     }).join("");
     updateSend();
   }
@@ -538,15 +575,17 @@
     save(); renderModes();
   }
 
-  function streamInto(chat, msg) {
+  function streamInto(chat, msg, attachments) {
     msg.pending = true;
     renderThread();
     var body = els.thread.querySelector(".msg.bot:last-child .md");
-    requestReply(chat.messages[chat.messages.length - 2].text, chat.mode, chat, function (full, error, remaining) {
+    requestReply(chat.messages[chat.messages.length - 2].text, chat.mode, chat, attachments || [], thinkMode, function (full, error, remaining) {
       if (error) {
-        live = null; msg.pending = false;
+        live = null; voiceProcessing = false; msg.pending = false;
         msg.text = "I couldn't complete that request: " + error;
-        save(); renderAll(); return;
+        save(); renderAll();
+        if (voiceMode) speakReply(msg.text);
+        return;
       }
       if (typeof remaining === "number") state.usage = { day: eatDay(), count: DAILY_LIMIT - remaining };
       var i = 0;
@@ -560,6 +599,8 @@
           live = null;
           msg.pending = false;
           save(); renderAll();
+          voiceProcessing = false;
+          if (voiceMode) speakReply(full);
         }
       }, 22);
       live = { timer: timer, chat: chat, msg: msg };
@@ -576,24 +617,140 @@
     save(); renderAll();
   }
 
+  function fileToDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || "")); };
+      reader.onerror = function () { reject(new Error("Could not read " + file.name + ".")); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function prepareAttachments(files) {
+    return Promise.all(files.map(function (item) {
+      var file = item.file, type = file.type || "application/octet-stream";
+      return fileToDataUrl(file).then(function (dataUrl) {
+        var data = dataUrl.split(",")[1] || "";
+        if (type.indexOf("image/") === 0 && ["image/jpeg","image/png","image/gif","image/webp"].indexOf(type) >= 0) {
+          return { name: file.name, kind: "image", media_type: type, data: data };
+        }
+        if (type === "application/pdf") return { name: file.name, kind: "document", media_type: type, data: data };
+        if (/^(text\/|application\/json)/.test(type) || /\.(txt|md|csv|json)$/i.test(file.name)) {
+          var decoded = atob(data), bytes = Uint8Array.from(decoded, function (c) { return c.charCodeAt(0); });
+          return { name: file.name, kind: "text", text: new TextDecoder("utf-8").decode(bytes).slice(0, 120000) };
+        }
+        throw new Error("Unsupported file type: " + file.name + ". Use PDF, JPG, PNG, WEBP, GIF, TXT, MD, CSV or JSON.");
+      });
+    }));
+  }
+
   function send() {
     if (live) { stopStream(); return; }
     var text = els.input.value.trim();
     if ((!text && !pendingFiles.length) || left() <= 0) return;
+    var selectedFiles = pendingFiles.slice();
     var c = activeChat();
     if (!c) {
-      c = { id: uid(), title: (text || pendingFiles[0]).slice(0, 44), mode: state.mode, ts: Date.now(), messages: [] };
+      c = { id: uid(), title: (text || selectedFiles[0].name).slice(0, 44), mode: state.mode, ts: Date.now(), messages: [] };
       state.chats.push(c);
       state.activeId = c.id;
     }
     c.ts = Date.now();
-    c.messages.push({ role: "user", text: text, files: pendingFiles.slice() });
+    c.messages.push({ role: "user", text: text, files: selectedFiles.map(function (f) { return f.name; }) });
     var bot = { role: "bot", text: "", pending: true };
     c.messages.push(bot);
     els.input.value = ""; autosize();
     pendingFiles = [];
-    save(); renderSidebar(); renderChips();
-    streamInto(c, bot);
+    save(); renderSidebar(); renderChips(); renderThread();
+    prepareAttachments(selectedFiles).then(function (attachments) {
+      streamInto(c, bot, attachments);
+    }).catch(function (error) {
+      c.messages.pop();
+      c.messages.push({ role: "bot", text: "I couldn't read that attachment: " + (error.message || "Unsupported file.") });
+      save(); renderAll();
+      if (voiceMode) speakReply(c.messages[c.messages.length - 1].text);
+    });
+  }
+
+  function speechApi() {
+    return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+  }
+
+  function startListening(dictationOnly) {
+    var Speech = speechApi();
+    if (!Speech) {
+      window.alert("Speech recognition is not available in this browser. Try the latest Chrome or use your device keyboard microphone.");
+      if (!dictationOnly) endVoiceSession();
+      return;
+    }
+    if (speechRecognition) { try { speechRecognition.abort(); } catch (e) {} }
+    var recognition = new Speech();
+    speechRecognition = recognition;
+    recognition.lang = navigator.language || "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.onresult = function (event) {
+      var finalText = "";
+      for (var i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
+      }
+      if (!finalText.trim()) return;
+      if (dictationOnly) {
+        els.input.value = (els.input.value.trim() ? els.input.value.trim() + " " : "") + finalText.trim();
+        autosize(); els.input.focus();
+      } else {
+        els.input.value = finalText.trim(); autosize();
+        voiceProcessing = true;
+        $("voiceStatus").textContent = "Thinking…";
+        try { recognition.stop(); } catch (e) {}
+        send();
+      }
+    };
+    recognition.onerror = function (event) {
+      if (event.error !== "no-speech" && event.error !== "aborted") console.warn("JASVO speech recognition:", event.error);
+      if (!dictationOnly && voiceMode && event.error !== "aborted") setTimeout(function () { if (voiceMode && !live) startListening(false); }, 700);
+    };
+    recognition.onend = function () {
+      if (speechRecognition === recognition) speechRecognition = null;
+      if (!dictationOnly && voiceMode && !live && !voiceProcessing && !window.speechSynthesis.speaking) {
+        setTimeout(function () { if (voiceMode && !speechRecognition) startListening(false); }, 350);
+      }
+    };
+    try { recognition.start(); } catch (e) { if (!dictationOnly) endVoiceSession(); }
+  }
+
+  function speakReply(text) {
+    if (!voiceMode || !window.speechSynthesis || !window.SpeechSynthesisUtterance) return;
+    window.speechSynthesis.cancel();
+    var utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = navigator.language || "en-US";
+    utterance.rate = 1;
+    $("voiceStatus").textContent = "Speaking…";
+    utterance.onend = function () { if (voiceMode) { $("voiceStatus").textContent = "Listening…"; startListening(false); } };
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function endVoiceSession() {
+    voiceMode = false;
+    voiceProcessing = false;
+    if (speechRecognition) { try { speechRecognition.abort(); } catch (e) {} speechRecognition = null; }
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    $("voiceBtn").classList.remove("voice-active");
+    $("voiceBtn").setAttribute("aria-label", "Start voice conversation");
+    $("voiceStatus").textContent = "";
+  }
+
+  function toggleVoiceSession() {
+    if (voiceMode) { endVoiceSession(); return; }
+    if (!speechApi() || !window.speechSynthesis) {
+      window.alert("Voice conversation needs a browser with speech recognition and speech synthesis. Try the latest Chrome.");
+      return;
+    }
+    voiceMode = true;
+    $("voiceBtn").classList.add("voice-active");
+    $("voiceBtn").setAttribute("aria-label", "End voice conversation");
+    $("voiceStatus").textContent = "Listening… Tap the blue button to end.";
+    startListening(false);
   }
 
   function regenerate() {
@@ -676,9 +833,23 @@
     });
     $("attachBtn").addEventListener("click", function () { $("fileInput").click(); });
     $("fileInput").addEventListener("change", function (e) {
-      // UI only: file names are shown as chips; reading and uploading belong to the backend work.
-      Array.prototype.forEach.call(e.target.files, function (f) { pendingFiles.push(f.name); });
+      Array.prototype.forEach.call(e.target.files, function (file) {
+        var supported = ["image/jpeg","image/png","image/gif","image/webp","application/pdf","text/plain","text/markdown","text/csv","application/json"].indexOf(file.type) >= 0 || /\.(txt|md|csv|json)$/i.test(file.name);
+        if (!supported) { window.alert("Unsupported file type. Use PDF, JPG, PNG, WEBP, GIF, TXT, MD, CSV or JSON."); return; }
+        var total = pendingFiles.reduce(function (sum, item) { return sum + item.file.size; }, 0);
+        if (file.size > 2 * 1024 * 1024 || total + file.size > 4 * 1024 * 1024) { window.alert("Keep each file under 2 MB and the total attachments under 4 MB."); return; }
+        if (pendingFiles.length >= 4) { window.alert("Attach up to 4 files per message."); return; }
+        pendingFiles.push({ name: file.name, file: file });
+      });
       e.target.value = ""; renderChips();
+    });
+    $("micBtn").addEventListener("click", function () { startListening(true); });
+    $("voiceBtn").addEventListener("click", toggleVoiceSession);
+    $("thinkBtn").addEventListener("click", function () {
+      thinkMode = !thinkMode;
+      $("thinkBtn").classList.toggle("think-active", thinkMode);
+      $("thinkBtn").setAttribute("aria-pressed", thinkMode ? "true" : "false");
+      $("thinkLabel").textContent = thinkMode ? "Think on" : "Think";
     });
     els.search.addEventListener("input", renderSidebar);
     $("newChat").addEventListener("click", function () { newChat(); closeMenu(); });
@@ -692,9 +863,20 @@
     });
 
     $("accountBtn").addEventListener("click", function () { openAuth("signin"); });
-    $("profileButton").addEventListener("click", function () {
-      if (currentAuthUser && !currentAuthUser.is_anonymous) openAuth("signin");
+    $("profileButton").addEventListener("click", function () { toggleAccountMenu(); });
+    $("accountMenuClose").addEventListener("click", function () { toggleAccountMenu(false); });
+    $("menuUpgrade").addEventListener("click", function () { showSimpleOverlay("plansOverlay"); });
+    $("menuPersonalization").addEventListener("click", openSettings);
+    $("menuProfile").addEventListener("click", function () { toggleAccountMenu(false); openAuth("signin"); });
+    $("menuSettings").addEventListener("click", openSettings);
+    $("menuHelp").addEventListener("click", function () { showSimpleOverlay("helpOverlay"); });
+    $("menuLogout").addEventListener("click", function () {
+      toggleAccountMenu(false);
+      if (currentAuthUser && !currentAuthUser.is_anonymous) signOutAccount();
       else openAuth("signin");
+    });
+    document.addEventListener("click", function (event) {
+      if (!event.target.closest(".profile-area")) toggleAccountMenu(false);
     });
     $("collapseSidebar").addEventListener("click", function () {
       var collapsed = els.app.classList.toggle("sidebar-collapsed");
@@ -702,11 +884,7 @@
       $("collapseSidebar").setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
       $("collapseSidebar").title = collapsed ? "Expand sidebar" : "Collapse sidebar";
     });
-    $("settingsShortcut").addEventListener("click", function () {
-      $("settingsOverlay").hidden = false;
-      $("preferredName").focus();
-      closeMenu();
-    });
+    $("settingsShortcut").addEventListener("click", openSettings);
     $("settingsClose").addEventListener("click", function () { $("settingsOverlay").hidden = true; });
     $("settingsOverlay").addEventListener("click", function (e) { if (e.target === $("settingsOverlay")) $("settingsOverlay").hidden = true; });
     $("settingsTheme").addEventListener("click", function () {
@@ -764,6 +942,10 @@
         });
       });
     }
+    $("plansClose").addEventListener("click", function () { $("plansOverlay").hidden = true; });
+    $("plansOverlay").addEventListener("click", function (e) { if (e.target === $("plansOverlay")) $("plansOverlay").hidden = true; });
+    $("helpClose").addEventListener("click", function () { $("helpOverlay").hidden = true; });
+    $("helpOverlay").addEventListener("click", function (e) { if (e.target === $("helpOverlay")) $("helpOverlay").hidden = true; });
     $("authClose").addEventListener("click", closeAuth);
     $("authOverlay").addEventListener("click", function (event) {
       if (event.target === $("authOverlay")) closeAuth();
@@ -807,9 +989,11 @@
         }
       });
     }
+    document.addEventListener("visibilitychange", function () { if (document.hidden && voiceMode) endVoiceSession(); });
     renderAll();
     renderAccount();
     backendReady.then(function (session) {
+      renderAccount();
       if (localStorage.getItem("jasvo.pendingEmailPassword") === "1" &&
           session.user && !session.user.is_anonymous && session.user.email_confirmed_at) {
         authMode = "signup";
