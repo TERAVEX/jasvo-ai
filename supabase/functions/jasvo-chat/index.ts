@@ -16,19 +16,35 @@ Deno.serve(async(req:Request)=>{
   const {data:auth,error:authErr}=await db.auth.getUser();
   if(authErr||!auth.user)return json({error:"Your session expired. Please reopen JASVO AI."},401);
   const body=await req.json(),prompt=String(body.prompt??"").trim(),mode=String(body.mode??"chat"),chatId=String(body.chat_id??""),title=String(body.title??"New chat").slice(0,120);
-  if(!prompt||prompt.length>12000)return json({error:"Message must be between 1 and 12,000 characters."},400);
+  const attachments=Array.isArray(body.attachments)?body.attachments:[],think=body.think===true;
+  if((!prompt&&!attachments.length)||prompt.length>12000)return json({error:"Add a message or an attachment. Messages may contain up to 12,000 characters."},400);
+  if(attachments.length>4)return json({error:"Attach up to 4 files per message."},400);
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(chatId))return json({error:"Invalid chat session."},400);
   if(!["chat","tutor","study","practice","exam"].includes(mode))return json({error:"Invalid mode."},400);
   const {data:prior,error:historyErr}=await db.from("chat_messages").select("role,content").eq("session_id",chatId).order("created_at",{ascending:true}).limit(24);
   if(historyErr)throw historyErr;
   const guidance:Record<string,string>={chat:"Be a helpful, natural general-purpose assistant.",tutor:"Teach step by step, check understanding, and adapt to the learner's level.",study:"Help create clear summaries, revision notes, and flashcards from supplied material.",practice:"Give one exercise at a time and provide constructive feedback after each answer.",exam:"Act as an exam coach. Ask questions, keep score when appropriate, and explain corrections."};
-  const messages=[...(prior??[]).map((m:{role:string;content:string})=>({role:m.role,content:m.content})),{role:"user",content:prompt}];
-  const response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":anthropicKey,"anthropic-version":"2023-06-01"},body:JSON.stringify({model,max_tokens:1400,system:"You are JASVO AI, a warm, capable Kenyan-origin AI companion by TERAVEX. Respond naturally in English, Kiswahili, Sheng, or mixed language based on the user's message. Be accurate, clear, and transparent about uncertainty. "+guidance[mode],messages})});
+  const content:any[]=[];
+  if(prompt)content.push({type:"text",text:prompt});
+  const fileLabels:string[]=[];
+  for(const item of attachments){
+   const name=String(item?.name??"attachment").slice(0,160),kind=String(item?.kind??""),media=String(item?.media_type??""),data=String(item?.data??"");
+   fileLabels.push(name);
+   if(kind==="image"&&["image/jpeg","image/png","image/gif","image/webp"].includes(media)&&data.length<=7_000_000){content.push({type:"image",source:{type:"base64",media_type:media,data}});}
+   else if(kind==="document"&&media==="application/pdf"&&data.length<=7_000_000){content.push({type:"document",source:{type:"base64",media_type:"application/pdf",data}});}
+   else if(kind==="text"&&typeof item.text==="string"&&item.text.length<=120000){content.push({type:"text",text:"\n\nAttached file: "+name+"\n"+item.text});}
+   else return json({error:"Unsupported or oversized attachment: "+name},400);
+  }
+  if(!prompt)content.unshift({type:"text",text:"Please analyse the attached file(s)."});
+  const messages=[...(prior??[]).map((m:{role:string;content:string})=>({role:m.role,content:m.content})),{role:"user",content}];
+  const system="You are JASVO AI, a warm, capable Kenyan-origin AI companion by TERAVEX. Respond naturally in English, Kiswahili, Sheng, or mixed language based on the user's message. Be accurate, clear, and transparent about uncertainty. "+guidance[mode]+(think?" Take extra care to reason through the task, check assumptions, and provide a well-structured answer. Do not reveal private chain-of-thought; provide concise conclusions and useful explanations.":"");
+  const response=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":anthropicKey,"anthropic-version":"2023-06-01"},body:JSON.stringify({model,max_tokens:1400,system,messages})});
   const payload=await response.json().catch(()=>({}));
   if(!response.ok){console.error("Anthropic provider error:",response.status,payload?.error?.type??"unknown");return json({error:"The AI provider could not complete this request. Please try again shortly."},502);}
   const reply=(payload?.content??[]).filter((p:{type:string})=>p.type==="text").map((p:{text:string})=>p.text).join("\n").trim();
   if(!reply)return json({error:"JASVO did not receive a usable response. Please try again."},502);
-  const {data:count,error:saveErr}=await db.rpc("persist_chat_turn",{p_session_id:chatId,p_title:title,p_mode:mode,p_user_message:prompt,p_assistant_message:reply});
+  const savedPrompt=(prompt||"Please analyse the attached file(s).")+(fileLabels.length?"\n\n[Attachments: "+fileLabels.join(", ")+"]":"");
+  const {data:count,error:saveErr}=await db.rpc("persist_chat_turn",{p_session_id:chatId,p_title:title,p_mode:mode,p_user_message:savedPrompt,p_assistant_message:reply});
   if(saveErr)return json({error:saveErr.message},saveErr.message?.includes("Daily free message limit")?429:500);
   return json({reply,remaining:Math.max(0,10-Number(count))});
  }catch(error){console.error("jasvo-chat:",error);return json({error:"Something went wrong while processing your message. Please try again."},500);}

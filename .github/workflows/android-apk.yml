@@ -8,6 +8,7 @@ on:
       - 'chat-ui/**'
       - 'package.json'
       - 'capacitor.config.json'
+      - 'supabase/functions/**'
       - '.github/workflows/android-apk.yml'
   push:
     branches: [main]
@@ -15,6 +16,7 @@ on:
       - 'chat-ui/**'
       - 'package.json'
       - 'capacitor.config.json'
+      - 'supabase/functions/**'
       - '.github/workflows/android-apk.yml'
 
 permissions:
@@ -66,9 +68,32 @@ jobs:
       - name: Verify bundled SDK is in Android assets
         run: test -s android/app/src/main/assets/public/supabase-sdk.js
 
+      - name: Configure Maven Central mirror for transient rate limits
+        run: |
+          cat > "$RUNNER_TEMP/maven-mirror.init.gradle" <<'EOF'
+          allprojects {
+            repositories {
+              maven { url 'https://maven-central.storage-download.googleapis.com/maven2' }
+            }
+          }
+          EOF
+
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        env:
+          GRADLE_OPTS: -Dorg.gradle.internal.http.connectionTimeout=60000 -Dorg.gradle.internal.http.socketTimeout=60000
+        run: |
+          for attempt in 1 2 3; do
+            echo "Gradle build attempt ${attempt}/3"
+            if ./gradlew --no-daemon --max-workers=2 --init-script "$RUNNER_TEMP/maven-mirror.init.gradle" assembleDebug; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 30))
+            fi
+          done
+          echo "Gradle build failed after three attempts."
+          exit 1
 
       - name: Prepare public APK filename
         if: github.event_name == 'push'
